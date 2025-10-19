@@ -191,6 +191,23 @@ vbdev_forward_io(ocf_volume_t volume, ocf_forward_token_t token,
 		status = spdk_bdev_readv(base->desc, ch, iovs, iovcnt,
 					 addr, bytes, cb, (void *) token);
 	} else if (dir == OCF_WRITE) {
+		ocf_cache_mode_t mode = ocf_cache_get_mode(base->parent->ocf_cache);
+		// bool is_mngt = ocf_queue_is_mngt(ocf_forward_get_io_queue(token));
+
+		if (!base->is_cache &&
+			mode == ocf_cache_mode_wt) { // && !is_mngt) {
+			/* If write-through mode and supress_backing_writes is set
+			 * we do not forward writes to the core device
+			 */
+			if (iovs_allocated) {
+				env_free(iovs);
+			}
+			SPDK_DEBUGLOG(vbdev_ocf_volume,
+						"Suppressing write to core in WT mode (%s)\n",
+						base->name);
+			ocf_forward_end(token, 0);
+			return;
+		}
 		status = spdk_bdev_writev(base->desc, ch, iovs, iovcnt,
 					  addr, bytes, cb, (void *) token);
 	}
@@ -218,6 +235,21 @@ vbdev_forward_flush(ocf_volume_t volume, ocf_forward_token_t token)
 	ch = vbdev_forward_get_channel(volume, token);
 	if (unlikely(ch == NULL)) {
 		ocf_forward_end(token, -EFAULT);
+		return;
+	}
+
+	ocf_cache_mode_t mode = ocf_cache_get_mode(base->parent->ocf_cache);
+	// bool is_mngt = ocf_queue_is_mngt(ocf_forward_get_io_queue(token));
+
+	if (!base->is_cache &&
+		mode == ocf_cache_mode_wt) { // && !is_mngt) {
+		/* If write-through mode and supress_backing_writes is set
+		 * we do not forward writes to the core device
+		 */
+		SPDK_DEBUGLOG(vbdev_ocf_volume,
+					"Suppressing flush to core in WT mode (%s)\n",
+					base->name);
+		ocf_forward_end(token, 0);
 		return;
 	}
 
@@ -308,6 +340,22 @@ vbdev_forward_io_simple(ocf_volume_t volume, ocf_forward_token_t token,
 					 data->iovcnt, addr, bytes,
 					 vbdev_forward_io_simple_cb, ctx);
 	} else if (dir == OCF_WRITE) {
+		ocf_cache_mode_t mode = ocf_cache_get_mode(base->parent->ocf_cache);
+		// bool is_mngt = ocf_queue_is_mngt(ocf_forward_get_io_queue(token));
+
+		if (!base->is_cache &&
+			mode == ocf_cache_mode_wt) { // && !is_mngt) {
+			/* If write-through mode and supress_backing_writes is set
+			 * we do not forward writes to the core device
+			 */
+			SPDK_DEBUGLOG(vbdev_ocf_volume,
+						"Suppressing simple write to core in WT mode (%s)\n",
+						base->name);
+            spdk_put_io_channel(ctx->ch);
+			env_free(ctx);
+			ocf_forward_end(token, 0);
+			return;
+		}
 		status = spdk_bdev_writev(base->desc, ctx->ch, data->iovs,
 					  data->iovcnt, addr, bytes,
 					  vbdev_forward_io_simple_cb, ctx);
