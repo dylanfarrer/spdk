@@ -1564,7 +1564,7 @@ _ocf_watchdog_fn(void *arg)
                        vbdev->name);
 
         /* Use the OCF management API directly with enum + callback */
-        ocf_cache_mode_t new_mode = ocf_cache_mode_wt;
+        ocf_cache_mode_t new_mode = ocf_get_cache_mode(vbdev->pending_mode_name);
 
         int rc = ocf_mngt_cache_set_mode(vbdev->ocf_cache, new_mode);
         if (rc) {
