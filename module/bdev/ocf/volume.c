@@ -361,6 +361,35 @@ vbdev_forward_io_simple(ocf_volume_t volume, ocf_forward_token_t token,
 					  vbdev_forward_io_simple_cb, ctx);
 	}
 
+
+/*
+somethign like:
+
+static int
+_ocf_watchdog_fn(void *arg)
+{
+    struct bdev_ocf_data *data = arg;
+
+    int rc = check_cache_health(data);
+    if (rc == WATCHDOG_TRIGGER) {
+        // Change cache mode
+        spdk_bdev_ocf_set_cache_mode(data, OCF_CACHE_MODE_WT);
+    }
+
+    return SPDK_POLLER_CONTINUE; // keep running
+}
+
+void
+bdev_ocf_start_watchdog(struct bdev_ocf_data *data)
+{
+    data->watchdog_poller = SPDK_POLLER_REGISTER(_ocf_watchdog_fn,
+                                                 data,
+                                                 1000000); // 1s interval in µs
+}
+
+
+*/
+
 	if (unlikely(status)) {
 		SPDK_ERRLOG("Submission failed with status=%d\n", status);
 		spdk_put_io_channel(ctx->ch);
