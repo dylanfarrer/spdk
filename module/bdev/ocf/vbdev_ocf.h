@@ -100,6 +100,9 @@ struct vbdev_ocf_base {
 	/* True if this is a caching device */
 	bool                         is_cache;
 
+	/* If true: This is the core (non-cache bdev), and no IO should be forwarded if in write-through (wt) mode. */
+	// bool						supress_backing_writes;
+
 	/* Connected SPDK block device */
 	struct spdk_bdev            *bdev;
 
@@ -126,6 +129,7 @@ struct vbdev_ocf_base {
 struct vbdev_ocf {
 	/* Exposed unique name */
 	char                        *name;
+	struct spdk_poller 			*watchdog_poller;
 
 	/* Base bdevs */
 	struct vbdev_ocf_base        cache;
