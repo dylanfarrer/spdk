@@ -1465,6 +1465,13 @@ attach_base_bdevs(struct vbdev_ocf *vbdev,
 	return rc;
 }
 
+/*
+	farrer
+
+	OCF callback function that will handle the cache passed from OCF -- which was pulled by entering a read lock.
+	If the cache is in write-though mode and the criteria is met for changing to pass-through (TODO, change this), it will
+	be requested that it be changed next time the thread is scheduled. Vice versa for pass-through to write-through.
+*/
 static void
 _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
 {
@@ -1481,27 +1488,44 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
         return;
     }
 
-    /* simple file existence sanity marker */
-    if (access("/watching", F_OK) != 0) {
-        FILE *file = fopen("/watching", "w");
-        if (file) {
-            SPDK_NOTICELOG("Created /watching file (debug marker)\n");
-            fclose(file);
-        } else {
-            SPDK_ERRLOG("Failed to create /watching file\n");
-        }
-    }
+    // // DEBUG CODE: create a file to indicate watchdog is running
+    // if (access("/watching", F_OK) != 0) {
+    //     FILE *file = fopen("/watching", "w");
+    //     if (file) {
+    //         SPDK_NOTICELOG("Created /watching file (debug marker)\n");
+    //         fclose(file);
+    //     } else {
+    //         SPDK_ERRLOG("Failed to create /watching file\n");
+    //     }
+    // }
 
     ocf_cache_mode_t current_mode = ocf_cache_get_mode(cache);
     SPDK_NOTICELOG("OCF watchdog: vbdev=%s current_mode=%d\n",
                    vbdev->name, current_mode);
 
-    /* Condition for mode change request (example trigger via file) */
-    if (current_mode == ocf_cache_mode_pt && access("/changepol", F_OK) == 0) {
-        vbdev->pending_mode_change = true;
-        memcpy(vbdev->pending_mode_name, "wt", 3);
-        SPDK_NOTICELOG("OCF watchdog: scheduled mode change -> %s for vbdev=%s\n",
-                       vbdev->pending_mode_name, vbdev->name);
+    if (current_mode == ocf_cache_mode_pt)  {
+        SPDK_NOTICELOG("OCF watchdog: current mode is PT, checking for /changepol\n");
+		// TODO (farrer) add actual check here
+        if (access("/changepol", F_OK) == 0) {
+            vbdev->pending_mode_change = true;
+            memcpy(vbdev->pending_mode_name, "wt", 3);
+            SPDK_NOTICELOG("OCF watchdog: scheduled change PT → WT for vbdev=%s\n",
+                           vbdev->name);
+        }
+
+    } else if (current_mode == ocf_cache_mode_wt)  {
+        SPDK_NOTICELOG("OCF watchdog: current mode is WT, checking for missing /changepol\n");
+		// TODO (farrer) add actual check here
+        if (access("/changepol", F_OK) != 0) {
+            vbdev->pending_mode_change = true;
+            memcpy(vbdev->pending_mode_name, "pt", 3);
+            SPDK_NOTICELOG("OCF watchdog: scheduled change WT → PT for vbdev=%s\n",
+                           vbdev->name);
+        }
+
+    } else {
+        SPDK_NOTICELOG("OCF watchdog: current mode is neither PT nor WT, no change possible for vbdev=%s\n",
+                       vbdev->name);
     }
 
     /* Lock is automatically released by OCF after callback */
