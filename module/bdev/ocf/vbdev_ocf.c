@@ -1465,7 +1465,52 @@ attach_base_bdevs(struct vbdev_ocf *vbdev,
 	return rc;
 }
 
+static void
+_watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
+{
+    struct vbdev_ocf *vbdev = priv;
+
+    if (error) {
+        SPDK_ERRLOG("Watchdog: failed to acquire cache read lock (%d)\n", error);
+        return;
+    }
+
+    ocf_cache_mode_t current_mode = ocf_cache_get_mode(cache);
+
+	SPDK_NOTICELOG("OCF watchdog poller checking file existence and policy\n");
+
+
+	if (current_mode == ocf_cache_mode_pt && access("/changepol", F_OK) == 0) {
+        // Safe to request a mode change from SPDK vbdev API
+        vbdev_ocf_set_cache_mode(vbdev, "write-through", NULL, NULL);
+    }
+
+    // Lock is automatically released by OCF after callback
+}
+
+static int
+_ocf_watchdog_fn(void *arg)
+{
+    struct vbdev_ocf *vbdev = arg;
+
+	SPDK_NOTICELOG("OCF watchdog poller triggered for vbdev: %s\n", vbdev->name);
+
+    // Acquire read lock on OCF cache to safely check mode
+    ocf_mngt_cache_read_lock(vbdev->ocf_cache, _watchdog_check_cb, vbdev);
+
+    return 0;
+}
+
+static void
+bdev_ocf_start_watchdog(struct vbdev_ocf *vbdev)
+{
+    vbdev->watchdog_poller = SPDK_POLLER_REGISTER(_ocf_watchdog_fn,
+                                                  vbdev,
+                                                  1000000); // 1s interval in µs
+}
+
 /* Init and then start vbdev if all base devices are present */
+// TODO (farrer) -- place to grab cache mode, and to register the 
 void
 vbdev_ocf_construct(const char *vbdev_name,
 		    const char *cache_mode_name,
@@ -1510,6 +1555,14 @@ vbdev_ocf_construct(const char *vbdev_name,
 
 	if (core_bdev && cache_bdev) {
 		register_vbdev(vbdev, cb, cb_arg);
+
+		SPDK_NOTICELOG("About to check cache mode for vbdev: %s\n", vbdev->name);
+
+		// Only start the watchdog if passthrough (PT) cache mode
+        if (strcmp(cache_mode_name, "pt") == 0) {
+			SPDK_NOTICELOG("Starting OCF watchdog for vbdev: %s\n", vbdev->name);
+            bdev_ocf_start_watchdog(vbdev); // Registers SPDK poller
+        }
 	} else {
 		cb(0, vbdev, cb_arg);
 	}

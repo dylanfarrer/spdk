@@ -129,6 +129,7 @@ struct vbdev_ocf_base {
 struct vbdev_ocf {
 	/* Exposed unique name */
 	char                        *name;
+	struct spdk_poller 			*watchdog_poller;
 
 	/* Base bdevs */
 	struct vbdev_ocf_base        cache;
