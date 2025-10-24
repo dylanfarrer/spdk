@@ -1475,10 +1475,6 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
         return;
     }
 
-    ocf_cache_mode_t current_mode = ocf_cache_get_mode(cache);
-
-	SPDK_NOTICELOG("OCF watchdog poller checking file existence and policy\n");
-
 	if (access("/watching", F_OK) != 0) {
 		FILE *file = fopen("/watching", "w");
 		if (file) {
@@ -1489,34 +1485,39 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
 		}
 	}
 
+	ocf_cache_mode_t current_mode = ocf_cache_get_mode(cache);
 
-	if (current_mode == ocf_cache_mode_pt && access("/changepol", F_OK) == 0) {
-		if (access("/decided", F_OK) != 0) {
-			FILE *file = fopen("/decided", "w");
-			if (file) {
-				SPDK_NOTICELOG("Created /decided file as it did not exist\n");
-				fclose(file);
-			} else {
-				SPDK_ERRLOG("Failed to create /decided file\n");
-			}
-		}
+    SPDK_NOTICELOG("OCF watchdog: current_mode=%d\n", current_mode);
 
-        // Safe to request a mode change from SPDK vbdev API
-        vbdev_ocf_set_cache_mode(vbdev, "wt", NULL, NULL);
+    /* If conditions met, mark a request to change mode, do NOT call change directly */
+    if (current_mode == ocf_cache_mode_pt && access("/changepol", F_OK) == 0) {
+        /* set pending change to write-through */
+        vbdev->pending_mode_change = true;
+        snprintf(vbdev->pending_mode_name, sizeof(vbdev->pending_mode_name), "wt");
+        SPDK_NOTICELOG("OCF watchdog: scheduled mode change to %s\n", vbdev->pending_mode_name);
     }
 
-    // Lock is automatically released by OCF after callback
+    /* Lock is automatically released by OCF after callback */
 }
 
 static int
 _ocf_watchdog_fn(void *arg)
 {
-    struct vbdev_ocf *vbdev = arg;
+	struct vbdev_ocf *vbdev = arg;
 
-	SPDK_NOTICELOG("OCF watchdog poller triggered for vbdev: %s\n", vbdev->name);
+    /* Handle any pending mode change (must be done *outside* OCF lock) */
+    if (vbdev->pending_mode_change) {
+        /* clear flag before calling to avoid re-entrancy */
+        vbdev->pending_mode_change = false;
 
-    // Acquire read lock on OCF cache to safely check mode
-    ocf_mngt_cache_read_lock(vbdev->ocf_cache, _watchdog_check_cb, vbdev);
+        SPDK_NOTICELOG("OCF watchdog: executing pending mode change -> %s\n", vbdev->pending_mode_name);
+
+        /* vbdev_ocf_set_cache_mode is allowed here because we're not holding an OCF lock */
+        vbdev_ocf_set_cache_mode(vbdev, vbdev->pending_mode_name, NULL, NULL);
+    } else {
+        /* No pending change: acquire read lock to inspect cache safely */
+        ocf_mngt_cache_read_lock(vbdev->ocf_cache, _watchdog_check_cb, vbdev);
+    }
 
     return 0;
 }

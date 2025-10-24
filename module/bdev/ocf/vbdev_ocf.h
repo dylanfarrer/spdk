@@ -129,6 +129,8 @@ struct vbdev_ocf_base {
 struct vbdev_ocf {
 	/* Exposed unique name */
 	char                        *name;
+	bool 						pending_mode_change;
+    char 						pending_mode_name[2];
 	struct spdk_poller 			*watchdog_poller;
 
 	/* Base bdevs */
