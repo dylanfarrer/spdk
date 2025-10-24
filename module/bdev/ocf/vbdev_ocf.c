@@ -1479,10 +1479,30 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
 
 	SPDK_NOTICELOG("OCF watchdog poller checking file existence and policy\n");
 
+	if (access("/watching", F_OK) != 0) {
+		FILE *file = fopen("/watching", "w");
+		if (file) {
+			SPDK_NOTICELOG("Created /watching file as it did not exist\n");
+			fclose(file);
+		} else {
+			SPDK_ERRLOG("Failed to create /watching file\n");
+		}
+	}
+
 
 	if (current_mode == ocf_cache_mode_pt && access("/changepol", F_OK) == 0) {
+		if (access("/decided", F_OK) != 0) {
+			FILE *file = fopen("/decided", "w");
+			if (file) {
+				SPDK_NOTICELOG("Created /decided file as it did not exist\n");
+				fclose(file);
+			} else {
+				SPDK_ERRLOG("Failed to create /decided file\n");
+			}
+		}
+
         // Safe to request a mode change from SPDK vbdev API
-        vbdev_ocf_set_cache_mode(vbdev, "write-through", NULL, NULL);
+        vbdev_ocf_set_cache_mode(vbdev, "wt", NULL, NULL);
     }
 
     // Lock is automatically released by OCF after callback
