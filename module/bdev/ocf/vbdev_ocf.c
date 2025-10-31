@@ -1514,7 +1514,7 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
         }
 
     } else if (current_mode == ocf_cache_mode_wb)  {
-        SPDK_NOTICELOG("OCF watchdog: current mode is WT, checking for missing /changepol\n");
+        SPDK_NOTICELOG("OCF watchdog: current mode is WB, checking for missing /changepol\n");
 		// TODO (farrer) add actual check here
         if (access("/changepol", F_OK) != 0) {
             vbdev->pending_mode_change = true;
