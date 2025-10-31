@@ -1508,23 +1508,23 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
 		// TODO (farrer) add actual check here
         if (access("/changepol", F_OK) == 0) {
             vbdev->pending_mode_change = true;
-            memcpy(vbdev->pending_mode_name, "wt", 3);
-            SPDK_NOTICELOG("OCF watchdog: scheduled change PT → WT for vbdev=%s\n",
+            memcpy(vbdev->pending_mode_name, "wb", 3);
+            SPDK_NOTICELOG("OCF watchdog: scheduled change PT → WB for vbdev=%s\n",
                            vbdev->name);
         }
 
-    } else if (current_mode == ocf_cache_mode_wt)  {
+    } else if (current_mode == ocf_cache_mode_wb)  {
         SPDK_NOTICELOG("OCF watchdog: current mode is WT, checking for missing /changepol\n");
 		// TODO (farrer) add actual check here
         if (access("/changepol", F_OK) != 0) {
             vbdev->pending_mode_change = true;
             memcpy(vbdev->pending_mode_name, "pt", 3);
-            SPDK_NOTICELOG("OCF watchdog: scheduled change WT → PT for vbdev=%s\n",
+            SPDK_NOTICELOG("OCF watchdog: scheduled change WB → PT for vbdev=%s\n",
                            vbdev->name);
         }
 
     } else {
-        SPDK_NOTICELOG("OCF watchdog: current mode is neither PT nor WT, no change possible for vbdev=%s\n",
+        SPDK_NOTICELOG("OCF watchdog: current mode is neither PT nor WB, no change possible for vbdev=%s\n",
                        vbdev->name);
     }
 
