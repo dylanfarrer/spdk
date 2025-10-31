@@ -8,9 +8,18 @@
 #include "spdk/likely.h"
 #include "spdk/log.h"
 
+struct raid1_base_state {
+    bool active;                     // true = accepting IO
+    uint64_t last_latency_us;        // last IO latency
+    uint64_t avg_latency_us;         // moving average
+    uint64_t slow_io_count;          // number of slow IOs
+    uint64_t disable_timestamp;      // time when it was disabled
+};
+
 struct raid1_info {
 	/* The parent raid bdev */
 	struct raid_bdev *raid_bdev;
+	struct raid1_base_state *base_state; // array of per-base_bdev state
 };
 
 struct raid1_io_channel {
@@ -99,6 +108,8 @@ raid1_correct_read_error(void *_raid_io)
 {
 	struct raid_bdev_io *raid_io = _raid_io;
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+	struct raid1_info *r1info = raid_bdev->module_private;
+	struct raid1_base_state *base_state = r1info->base_state;
 	struct spdk_bdev_ext_io_opts io_opts;
 	struct raid_base_bdev_info *base_info;
 	struct spdk_io_channel *base_ch;
@@ -106,6 +117,13 @@ raid1_correct_read_error(void *_raid_io)
 	int ret;
 
 	i = raid_io->base_bdev_io_submitted;
+	if (!base_state[i].active) {
+		// skip since the mirror is inactive
+		// TODO (farrer) do we need to track this?
+		raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_SUCCESS);
+		return;
+	}
+
 	base_info = &raid_bdev->base_bdev_info[i];
 	base_ch = raid_bdev_channel_get_base_channel(raid_io->raid_ch, i);
 	assert(base_ch != NULL);
@@ -150,6 +168,8 @@ raid1_read_other_base_bdev(void *_raid_io)
 {
 	struct raid_bdev_io *raid_io = _raid_io;
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+	struct raid1_info *r1info = raid_bdev->module_private;
+    struct raid1_base_state *base_state = r1info->base_state;
 	struct spdk_bdev_ext_io_opts io_opts;
 	struct raid_base_bdev_info *base_info;
 	struct spdk_io_channel *base_ch;
@@ -161,7 +181,7 @@ raid1_read_other_base_bdev(void *_raid_io)
 		base_info = &raid_bdev->base_bdev_info[i];
 		base_ch = raid_bdev_channel_get_base_channel(raid_io->raid_ch, i);
 
-		if (base_ch == NULL || i == raid_io->base_bdev_io_submitted) {
+		if (!base_state[i].active || base_ch == NULL || i == raid_io->base_bdev_io_submitted) {
 			raid_io->base_bdev_io_remaining--;
 			continue;
 		}
@@ -216,16 +236,24 @@ _raid1_submit_rw_request(void *_raid_io)
 	raid1_submit_rw_request(raid_io);
 }
 
+// TODO (farrer) this is where we will decide which active base bdev to read from
 static uint8_t
 raid1_channel_next_read_base_bdev(struct raid_bdev *raid_bdev, struct raid_bdev_io_channel *raid_ch)
 {
 	struct raid1_io_channel *raid1_ch = raid_bdev_channel_get_module_ctx(raid_ch);
+	struct raid1_info *r1info = raid_bdev->module_private;
+    struct raid1_base_state *base_state = r1info->base_state;
 	uint64_t read_blocks_min = UINT64_MAX;
 	uint8_t idx = UINT8_MAX;
 	uint8_t i;
 
+	// loop through all bdevs, find the one that is:
+	// 1. active
+	// 2. has a valid channel
+	// 3. has the least outstanding read blocks
 	for (i = 0; i < raid_bdev->num_base_bdevs; i++) {
-		if (raid_bdev_channel_get_base_channel(raid_ch, i) != NULL &&
+		if (base_state[i].active &&
+			raid_bdev_channel_get_base_channel(raid_ch, i) != NULL &&
 		    raid1_ch->read_blocks_outstanding[i] < read_blocks_min) {
 			read_blocks_min = raid1_ch->read_blocks_outstanding[i];
 			idx = i;
@@ -292,9 +320,20 @@ raid1_submit_write_request(struct raid_bdev_io *raid_io)
 	for (idx = raid_io->base_bdev_io_submitted; idx < raid_bdev->num_base_bdevs; idx++) {
 		base_info = &raid_bdev->base_bdev_info[idx];
 		base_ch = raid_bdev_channel_get_base_channel(raid_io->raid_ch, idx);
+		struct raid1_info *r1info = raid_bdev->module_private;
+		struct raid1_base_state *base_state = &r1info->base_state[idx];
 
+		// if base bdev is missing, skip it
 		if (base_ch == NULL) {
 			/* skip a missing base bdev's slot */
+			raid_io->base_bdev_io_submitted++;
+			raid_bdev_io_complete_part(raid_io, 1, SPDK_BDEV_IO_STATUS_FAILED);
+			continue;
+		}
+
+		// if base bdev is inactive (AKA, we have disabled it due to latency), skip it
+		// TOOD (farrer) we will need to determine a re-integration strategy later
+		if (!base_state->active) {
 			raid_io->base_bdev_io_submitted++;
 			raid_bdev_io_complete_part(raid_io, 1, SPDK_BDEV_IO_STATUS_FAILED);
 			continue;
@@ -327,6 +366,7 @@ raid1_submit_write_request(struct raid_bdev_io *raid_io)
 	return ret;
 }
 
+// TODO (farrer) we can probably just care about repositioning IO here rather than at bdev_raid.c
 static void
 raid1_submit_rw_request(struct raid_bdev_io *raid_io)
 {
@@ -369,6 +409,8 @@ static void
 raid1_submit_null_payload_request(struct raid_bdev_io *raid_io)
 {
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+	struct raid1_info *r1info = raid_bdev->module_private;
+	struct raid1_base_state *base_state = r1info->base_state;
 	struct spdk_bdev_ext_io_opts io_opts;
 	struct raid_base_bdev_info *base_info;
 	struct spdk_io_channel *base_ch;
@@ -386,8 +428,8 @@ raid1_submit_null_payload_request(struct raid_bdev_io *raid_io)
 		base_info = &raid_bdev->base_bdev_info[idx];
 		base_ch = raid_bdev_channel_get_base_channel(raid_io->raid_ch, idx);
 
-		if (base_ch == NULL) {
-			/* skip a missing base bdev's slot */
+		if (!base_state[idx].active || base_ch == NULL) {
+			// skip missing or inactive mirror
 			raid_io->base_bdev_io_submitted++;
 			raid_bdev_io_complete_part(raid_io, 1, SPDK_BDEV_IO_STATUS_FAILED);
 			continue;
@@ -448,6 +490,11 @@ raid1_io_device_unregister_done(void *io_device)
 {
 	struct raid1_info *r1info = io_device;
 
+	if (r1info->base_state) {
+        free(r1info->base_state);
+        r1info->base_state = NULL;
+    }
+
 	raid_bdev_module_stop_done(r1info->raid_bdev);
 
 	free(r1info);
@@ -467,6 +514,18 @@ raid1_start(struct raid_bdev *raid_bdev)
 		return -ENOMEM;
 	}
 	r1info->raid_bdev = raid_bdev;
+
+	// Initialize per-base_bdev state
+	r1info->base_state = calloc(r1info->raid_bdev->num_base_bdevs, sizeof(struct raid1_base_state));
+	if (!r1info->base_state) {
+		SPDK_ERRLOG("Failed to allocate RAID1 base state structures\n");
+		free(r1info);
+		return -ENOMEM;
+	}
+	// Mark all base bdevs as active initially
+	for (int i = 0; i < r1info->raid_bdev->num_base_bdevs; i++) {
+		r1info->base_state[i].active = true;
+	}
 
 	RAID_FOR_EACH_BASE_BDEV(raid_bdev, base_info) {
 		min_blockcnt = spdk_min(min_blockcnt, base_info->data_size);
@@ -531,6 +590,24 @@ raid1_process_submit_write(struct raid_bdev_process_request *process_req)
 	struct raid_bdev_io *raid_io = &process_req->raid_io;
 	struct spdk_bdev_ext_io_opts io_opts;
 	int ret;
+
+	// TODO (farrer) is this as we need it ?
+	struct raid_base_bdev_info *target_base_info = process_req->target;
+	struct raid_bdev *raid_bdev = target_base_info->raid_bdev;
+	struct raid1_info *r1info = raid_bdev->module_private;
+	uint8_t idx;
+	for (idx = 0; idx < raid_bdev->num_base_bdevs; idx++) {
+		if (&raid_bdev->base_bdev_info[idx] == target_base_info) {
+			break;
+		}
+	}
+	assert(idx < raid_bdev->num_base_bdevs);
+
+	if (!r1info->base_state[idx].active) {
+		// Skip the inactive mirror
+		raid_bdev_process_request_complete(process_req, -EIO);
+		return;
+	}
 
 	raid1_init_ext_io_opts(&io_opts, raid_io);
 	ret = raid_bdev_writev_blocks_ext(process_req->target, process_req->target_ch,

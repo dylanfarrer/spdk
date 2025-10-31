@@ -964,6 +964,8 @@ raid_bdev_io_init(struct raid_bdev_io *raid_io, struct raid_bdev_io_channel *rai
  * returns:
  * none
  */
+// TODO (farrer) Important here. Will we need to make adjustments to determine the right end point for 
+// the IO? How will we know to get systems back online?
 static void
 raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io)
 {
@@ -976,6 +978,7 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 
 	spdk_trace_record(TRACE_BDEV_RAID_IO_START, 0, 0, (uintptr_t)raid_io, (uintptr_t)bdev_io);
 
+	// TODO (farrer) in degraded mode, we will need to have a say over where these operations go.
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
 		spdk_bdev_io_get_buf(bdev_io, raid_bdev_get_buf_cb,
