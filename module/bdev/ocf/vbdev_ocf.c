@@ -1500,31 +1500,31 @@ _watchdog_check_cb(ocf_cache_t cache, void *priv, int error)
     // }
 
     ocf_cache_mode_t current_mode = ocf_cache_get_mode(cache);
-    SPDK_NOTICELOG("OCF watchdog: vbdev=%s current_mode=%d\n",
+    SPDK_DEBUGLOG("OCF watchdog: vbdev=%s current_mode=%d\n",
                    vbdev->name, current_mode);
 
     if (current_mode == ocf_cache_mode_pt)  {
-        SPDK_NOTICELOG("OCF watchdog: current mode is PT, checking for /changepol\n");
+        SPDK_DEBUGLOG("OCF watchdog: current mode is PT, checking for /changepol\n");
 		// TODO (farrer) add actual check here
         if (access("/changepol", F_OK) == 0) {
             vbdev->pending_mode_change = true;
             memcpy(vbdev->pending_mode_name, "wb", 3);
-            SPDK_NOTICELOG("OCF watchdog: scheduled change PT → WB for vbdev=%s\n",
+            SPDK_DEBUGLOG("OCF watchdog: scheduled change PT → WB for vbdev=%s\n",
                            vbdev->name);
         }
 
     } else if (current_mode == ocf_cache_mode_wb)  {
-        SPDK_NOTICELOG("OCF watchdog: current mode is WB, checking for missing /changepol\n");
+        SPDK_DEBUGLOG("OCF watchdog: current mode is WB, checking for missing /changepol\n");
 		// TODO (farrer) add actual check here
         if (access("/changepol", F_OK) != 0) {
             vbdev->pending_mode_change = true;
             memcpy(vbdev->pending_mode_name, "pt", 3);
-            SPDK_NOTICELOG("OCF watchdog: scheduled change WB → PT for vbdev=%s\n",
+            SPDK_DEBUGLOG("OCF watchdog: scheduled change WB → PT for vbdev=%s\n",
                            vbdev->name);
         }
 
     } else {
-        SPDK_NOTICELOG("OCF watchdog: current mode is neither PT nor WB, no change possible for vbdev=%s\n",
+        SPDK_DEBUGLOG("OCF watchdog: current mode is neither PT nor WB, no change possible for vbdev=%s\n",
                        vbdev->name);
     }
 
@@ -1550,7 +1550,7 @@ _ocf_watchdog_fn(void *arg)
     if (vbdev->pending_mode_change) {
         vbdev->pending_mode_change = false;
 
-        SPDK_NOTICELOG("OCF watchdog: executing pending mode change -> %s (vbdev=%s)\n",
+        SPDK_DEBUGLOG("OCF watchdog: executing pending mode change -> %s (vbdev=%s)\n",
                        vbdev->pending_mode_name, vbdev->name);
 
         /* Defensive checks before changing mode */
@@ -1560,7 +1560,7 @@ _ocf_watchdog_fn(void *arg)
             return 0;
         }
 
-        SPDK_NOTICELOG("OCF watchdog: calling ocf_mngt_cache_set_mode() for vbdev=%s\n",
+        SPDK_DEBUGLOG("OCF watchdog: calling ocf_mngt_cache_set_mode() for vbdev=%s\n",
                        vbdev->name);
 
         /* Use the OCF management API directly with enum + callback */
@@ -1572,7 +1572,7 @@ _ocf_watchdog_fn(void *arg)
                         rc, vbdev->name);
         }
 
-        SPDK_NOTICELOG("OCF watchdog: returned from ocf_mngt_cache_set_mode() for vbdev=%s\n",
+        SPDK_DEBUGLOG("OCF watchdog: returned from ocf_mngt_cache_set_mode() for vbdev=%s\n",
                        vbdev->name);
     } else {
         /* No pending change: just inspect cache safely under read lock */
