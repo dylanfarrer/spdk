@@ -122,6 +122,15 @@ struct vbdev_ocf_base {
 	struct spdk_thread	    *thread;
 };
 
+struct spdk_ocf_slo {
+	uint32_t percentile;
+	uint64_t latency_us;
+	uint64_t rw_duration_us;
+	uint64_t rw_min_sample;
+	uint64_t evaluation_ticks_us;
+	uint64_t violation_time_us;
+};
+
 /*
  * The main information provider
  * It's also registered as io_device
