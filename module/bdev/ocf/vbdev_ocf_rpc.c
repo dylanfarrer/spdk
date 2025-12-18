@@ -35,6 +35,12 @@ struct rpc_bdev_ocf_create {
 	uint64_t cache_line_size;	/* OCF cache line size */
 	char *cache_bdev_name;		/* sub bdev */
 	char *core_bdev_name;		/* sub bdev */
+	char *slo_percentile;
+	uint64_t slo_latency_us;
+	char *rw_duration;
+	uint64_t rw_min_sample;
+	char *evaluation_ticks;
+	char *violation_time;
 };
 
 static void
@@ -44,6 +50,10 @@ free_rpc_bdev_ocf_create(struct rpc_bdev_ocf_create *r)
 	free(r->core_bdev_name);
 	free(r->cache_bdev_name);
 	free(r->mode);
+	free(r->slo_percentile);
+	free(r->rw_duration);
+	free(r->evaluation_ticks);
+	free(r->violation_time);
 }
 
 /* Structure to decode the input parameters for this RPC method. */
@@ -53,6 +63,12 @@ static const struct spdk_json_object_decoder rpc_bdev_ocf_create_decoders[] = {
 	{"cache_line_size", offsetof(struct rpc_bdev_ocf_create, cache_line_size), spdk_json_decode_uint64, true},
 	{"cache_bdev_name", offsetof(struct rpc_bdev_ocf_create, cache_bdev_name), spdk_json_decode_string},
 	{"core_bdev_name", offsetof(struct rpc_bdev_ocf_create, core_bdev_name), spdk_json_decode_string},
+	{"slo_percentile", offsetof(struct rpc_bdev_ocf_create, slo_percentile), spdk_json_decode_string},
+	{"slo_latency_us", offsetof(struct rpc_bdev_ocf_create, slo_latency_us), spdk_json_decode_uint64, true},
+	{"rw_duration", offsetof(struct rpc_bdev_ocf_create, rw_duration), spdk_json_decode_string},
+	{"rw_min_sample", offsetof(struct rpc_bdev_ocf_create, rw_min_sample), spdk_json_decode_uint64, true},
+	{"evaluation_ticks", offsetof(struct rpc_bdev_ocf_create, evaluation_ticks), spdk_json_decode_string},
+	{"violation_time", offsetof(struct rpc_bdev_ocf_create, violation_time), spdk_json_decode_string},
 };
 
 static void
@@ -72,11 +88,34 @@ construct_cb(int status, struct vbdev_ocf *vbdev, void *cb_arg)
 	}
 }
 
+static uint64_t
+parse_time_us(const char *str)
+{
+    if (!str) return 0;
+
+    uint64_t val = 0;
+    char unit[3] = {0};
+
+    if (sscanf(str, "%lu%2s", &val, unit) < 1) {
+        return 0;
+    }
+
+    if (strcmp(unit, "ms") == 0) {
+        return val * 1000;
+    } else if (strcmp(unit, "s") == 0) {
+        return val * 1000000;
+    } else {
+        return val; // default: treat as microseconds
+    }
+}
+
 static void
 rpc_bdev_ocf_create(struct spdk_jsonrpc_request *request,
 		    const struct spdk_json_val *params)
 {
-	struct rpc_bdev_ocf_create req = {NULL};
+	struct rpc_bdev_ocf_create req = {0};
+	struct spdk_ocf_slo slo = {0};
+	const struct spdk_ocf_slo *slo_ptr = NULL;
 	int ret;
 
 	ret = spdk_json_decode_object(params, rpc_bdev_ocf_create_decoders,
@@ -89,8 +128,35 @@ rpc_bdev_ocf_create(struct spdk_jsonrpc_request *request,
 		return;
 	}
 
+	if (req.slo_percentile) {
+		if (strcmp(req.slo_percentile, "p90") == 0) slo.percentile = 90;
+		else if (strcmp(req.slo_percentile, "p95") == 0) slo.percentile = 95;
+		else if (strcmp(req.slo_percentile, "p99") == 0) slo.percentile = 99;
+		else if (strcmp(req.slo_percentile, "p999") == 0) slo.percentile = 999;
+		else {
+			spdk_jsonrpc_send_error_response(request,
+				SPDK_JSONRPC_ERROR_INVALID_PARAMS,
+				"Invalid slo_percentile");
+			free_rpc_bdev_ocf_create(&req);
+			return;
+		}
+	}
+
+	slo.latency_us = req.slo_latency_us;
+	slo.rw_duration_us = parse_time_us(req.rw_duration);
+	slo.rw_min_sample = req.rw_min_sample;
+	slo.evaluation_ticks_us = parse_time_us(req.evaluation_ticks);
+	slo.violation_time_us = parse_time_us(req.violation_time);
+
+	// Need all SLO args to enable it
+	if (req.slo_percentile && req.slo_latency_us &&
+	    req.rw_duration && req.rw_min_sample &&
+	    req.evaluation_ticks && req.violation_time) {
+		slo_ptr = &slo;
+	}
+
 	vbdev_ocf_construct(req.name, req.mode, req.cache_line_size, req.cache_bdev_name,
-			    req.core_bdev_name, false, construct_cb, request);
+			    req.core_bdev_name, false, slo_ptr, construct_cb, request);
 	free_rpc_bdev_ocf_create(&req);
 }
 SPDK_RPC_REGISTER("bdev_ocf_create", rpc_bdev_ocf_create, SPDK_RPC_RUNTIME)

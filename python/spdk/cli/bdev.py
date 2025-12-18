@@ -104,7 +104,13 @@ def add_parser(subparsers):
                                             mode=args.mode,
                                             cache_line_size=args.cache_line_size,
                                             cache_bdev_name=args.cache_bdev_name,
-                                            core_bdev_name=args.core_bdev_name))
+                                            core_bdev_name=args.core_bdev_name,
+                                            slo_percentile=args.slo_percentile,
+                                            slo_latency_us=args.slo_latency_us,
+                                            rw_duration=args.rw_duration,
+                                            rw_min_sample=args.rw_min_sample,
+                                            evaluation_ticks=args.evaluation_ticks,
+                                            violation_time=args.violation_time))
     p = subparsers.add_parser('bdev_ocf_create', help='Add an OCF block device')
     p.add_argument('name', help='Name of resulting OCF bdev')
     p.add_argument('mode', help='OCF cache mode', choices=['wb', 'wt', 'pt', 'wa', 'wi', 'wo'])
@@ -114,6 +120,12 @@ def add_parser(subparsers):
         type=int,
         choices=[4, 8, 16, 32, 64]
     )
+    p.add_argument('--slo-percentile', choices=['p90', 'p95', 'p99', 'p999'], help='SLO latency percentile')
+    p.add_argument('--slo-latency-us', type=int, help='Latency SLO in microseconds')
+    p.add_argument('--rw-duration', help='Read/write measurement window (e.g. 10s)')
+    p.add_argument('--rw-min-sample', type=int, help='Minimum number of samples for SLO evaluation')
+    p.add_argument('--evaluation-ticks', help='Evaluation interval (e.g. 100ms)')
+    p.add_argument('--violation-time', help='Allowed violation duration (e.g. 2s)')
     p.add_argument('cache_bdev_name', help='Name of underlying cache bdev')
     p.add_argument('core_bdev_name', help='Name of underlying core bdev')
     p.set_defaults(func=bdev_ocf_create)

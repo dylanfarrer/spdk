@@ -1593,14 +1593,16 @@ bdev_ocf_start_watchdog(struct vbdev_ocf *vbdev)
 /* Init and then start vbdev if all base devices are present */
 // TODO (farrer) -- place to grab cache mode, and to register the 
 void
-vbdev_ocf_construct(const char *vbdev_name,
-		    const char *cache_mode_name,
-		    const uint64_t cache_line_size,
-		    const char *cache_name,
-		    const char *core_name,
-		    bool loadq,
-		    void (*cb)(int, struct vbdev_ocf *, void *),
-		    void *cb_arg)
+vbdev_ocf_construct(
+    const char *vbdev_name,
+    const char *cache_mode_name,
+    const uint64_t cache_line_size,
+    const char *cache_name,
+    const char *core_name,
+    bool loadq,
+    const struct spdk_ocf_slo *slo,
+    void (*cb)(int, struct vbdev_ocf *, void *),
+    void *cb_arg)
 {
 	int rc;
 	struct spdk_bdev *cache_bdev = spdk_bdev_get_by_name(cache_name);
@@ -1617,6 +1619,13 @@ vbdev_ocf_construct(const char *vbdev_name,
 	if (vbdev == NULL) {
 		cb(-ENODEV, NULL, cb_arg);
 		return;
+	}
+
+	if (slo) {
+		vbdev->slo = *slo;
+		vbdev->slo_enabled = true;
+	} else {
+		vbdev->slo_enabled = false;
 	}
 
 	if (cache_bdev == NULL) {
@@ -1639,8 +1648,8 @@ vbdev_ocf_construct(const char *vbdev_name,
 
 		SPDK_NOTICELOG("About to check cache mode for vbdev: %s\n", vbdev->name);
 
-		// Only start the watchdog if passthrough (PT) cache mode
-        if (strcmp(cache_mode_name, "pt") == 0) {
+		// Only start the watchdog if passthrough (PT) cache mode and policy is enabled
+        if (vbdev->slo_enabled && strcmp(cache_mode_name, "pt") == 0) {
 			SPDK_NOTICELOG("Starting OCF watchdog for vbdev: %s\n", vbdev->name);
             bdev_ocf_start_watchdog(vbdev); // Registers SPDK poller
         }

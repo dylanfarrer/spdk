@@ -145,6 +145,9 @@ struct vbdev_ocf {
 	struct vbdev_ocf_config      cfg;
 	struct vbdev_ocf_state       state;
 
+	struct spdk_ocf_slo 		 slo;
+	bool 						 slo_enabled;
+
 	/* Management context */
 	struct vbdev_ocf_mngt_ctx    mngt_ctx;
 
@@ -168,14 +171,15 @@ struct vbdev_ocf {
 };
 
 void vbdev_ocf_construct(
-	const char *vbdev_name,
-	const char *cache_mode_name,
-	const uint64_t cache_line_size,
-	const char *cache_name,
-	const char *core_name,
-	bool loadq,
-	void (*cb)(int, struct vbdev_ocf *, void *),
-	void *cb_arg);
+    const char *vbdev_name,
+    const char *cache_mode_name,
+    const uint64_t cache_line_size,
+    const char *cache_name,
+    const char *core_name,
+    bool loadq,
+    const struct spdk_ocf_slo *slo,
+    void (*cb)(int, struct vbdev_ocf *, void *),
+    void *cb_arg);
 
 /* If vbdev is online, return its object */
 struct vbdev_ocf *vbdev_ocf_get_by_name(const char *name);
