@@ -63,12 +63,12 @@ static const struct spdk_json_object_decoder rpc_bdev_ocf_create_decoders[] = {
 	{"cache_line_size", offsetof(struct rpc_bdev_ocf_create, cache_line_size), spdk_json_decode_uint64, true},
 	{"cache_bdev_name", offsetof(struct rpc_bdev_ocf_create, cache_bdev_name), spdk_json_decode_string},
 	{"core_bdev_name", offsetof(struct rpc_bdev_ocf_create, core_bdev_name), spdk_json_decode_string},
-	{"slo_percentile", offsetof(struct rpc_bdev_ocf_create, slo_percentile), spdk_json_decode_string},
+	{"slo_percentile", offsetof(struct rpc_bdev_ocf_create, slo_percentile), spdk_json_decode_string, true},
 	{"slo_latency_us", offsetof(struct rpc_bdev_ocf_create, slo_latency_us), spdk_json_decode_uint64, true},
-	{"rw_duration", offsetof(struct rpc_bdev_ocf_create, rw_duration), spdk_json_decode_string},
+	{"rw_duration", offsetof(struct rpc_bdev_ocf_create, rw_duration), spdk_json_decode_string, true},
 	{"rw_min_sample", offsetof(struct rpc_bdev_ocf_create, rw_min_sample), spdk_json_decode_uint64, true},
-	{"evaluation_ticks", offsetof(struct rpc_bdev_ocf_create, evaluation_ticks), spdk_json_decode_string},
-	{"violation_time", offsetof(struct rpc_bdev_ocf_create, violation_time), spdk_json_decode_string},
+	{"evaluation_ticks", offsetof(struct rpc_bdev_ocf_create, evaluation_ticks), spdk_json_decode_string, true},
+	{"violation_time", offsetof(struct rpc_bdev_ocf_create, violation_time), spdk_json_decode_string, true},
 };
 
 static void
