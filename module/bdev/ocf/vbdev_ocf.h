@@ -11,6 +11,8 @@
 #include "spdk/bdev.h"
 #include "spdk/bdev_module.h"
 
+#include "bdev_policy_watcher.h"
+
 #define VBDEV_OCF_MD_MAX_LEN 4096
 
 struct vbdev_ocf;

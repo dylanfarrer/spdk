@@ -1590,6 +1590,23 @@ bdev_ocf_start_watchdog(struct vbdev_ocf *vbdev)
                                                   1000000); // 1s interval in µs
 }
 
+static double
+_ocf_policy_test_measure(void *ctx)
+{
+	(void)ctx;
+	return 0.0;
+}
+
+static void
+_ocf_policy_test_evaluate(const struct bdev_policy_sample *samples,
+			  uint32_t sample_count,
+			  void *ctx)
+{
+	(void)samples;
+	(void)sample_count;
+	(void)ctx;
+}
+
 /* Init and then start vbdev if all base devices are present */
 // TODO (farrer) -- place to grab cache mode, and to register the 
 void
