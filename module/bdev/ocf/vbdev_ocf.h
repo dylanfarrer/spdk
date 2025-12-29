@@ -133,6 +133,11 @@ struct spdk_ocf_slo {
 	uint64_t violation_time_us;
 };
 
+struct spdk_ocf_slo_rt_sample {
+	bool     new;
+	int64_t  rt_ticks;
+};
+
 /*
  * The main information provider
  * It's also registered as io_device
@@ -158,6 +163,9 @@ struct vbdev_ocf {
 
 	struct spdk_ocf_slo 		 slo;
 	bool 						 slo_enabled;
+	bool                         violated_core;
+	struct spdk_ocf_slo_rt_sample  rt;
+	struct spdk_thread          *owner_thread;
 
 	/* Management context */
 	struct vbdev_ocf_mngt_ctx    mngt_ctx;

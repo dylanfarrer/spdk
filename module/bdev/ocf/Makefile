@@ -10,7 +10,7 @@ include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 SO_VER := 7
 SO_MINOR := 0
 
-CFLAGS += $(ENV_CFLAGS) -I$(SPDK_ROOT_DIR)/lib/env_ocf -I$(SPDK_ROOT_DIR)/lib/env_ocf/include
+CFLAGS += $(ENV_CFLAGS) -I$(SPDK_ROOT_DIR)/lib/env_ocf -I$(SPDK_ROOT_DIR)/lib/env_ocf/include -I$(SPDK_ROOT_DIR)/lib/bdev
 C_SRCS = $(shell ls *.c)
 
 LIBNAME := bdev_ocf

@@ -541,11 +541,46 @@ vbdev_ocf_foreach(vbdev_ocf_foreach_fn fn, void *ctx)
 	}
 }
 
+// helpers for return time latency measurement
+struct ocf_rt_msg {
+	struct vbdev_ocf *vbdev;
+	int64_t rt_ticks;
+};
+
+// helpers for return time latency measurement
+static void
+vbdev_ocf_update_rt(void *arg)
+{
+	struct ocf_rt_msg *msg = arg;
+	struct vbdev_ocf *vbdev = msg->vbdev;
+
+	vbdev->rt.rt_ticks = msg->rt_ticks;
+	vbdev->rt.new = true;
+
+	free(msg);
+}
+
 /* Called from OCF when SPDK_IO is completed */
 static void
 vbdev_ocf_io_submit_cb(ocf_io_t io, void *priv1, void *priv2, int error)
 {
 	struct spdk_bdev_io *bdev_io = priv1;
+	struct vbdev_ocf *vbdev = bdev_io->bdev->ctxt;
+	struct bdev_ocf_data *data = vbdev_ocf_data_from_spdk_io(bdev_io);
+
+	// calaculate return time latency
+	uint64_t now = spdk_get_ticks();
+	int64_t rt_ticks = now - data->submit_ticks;
+
+	// request that we send message to vbdev thread to update rt
+	struct ocf_rt_msg *msg = malloc(sizeof(*msg));
+	if (msg) {
+		msg->vbdev = vbdev;
+		msg->rt_ticks = rt_ticks;
+		spdk_thread_send_msg(vbdev->owner_thread, // thread we are asking
+							 vbdev_ocf_update_rt, // function to call
+							 msg); // args to that function
+	}
 
 	if (error == 0) {
 		spdk_bdev_io_complete(bdev_io, SPDK_BDEV_IO_STATUS_SUCCESS);
@@ -628,6 +663,8 @@ io_handle(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io)
 		err = -ENOMEM;
 		goto fail;
 	}
+
+	data->submit_ticks = spdk_get_ticks();
 
 	err = ocf_io_set_data(io, data, 0);
 	if (err) {
@@ -1591,10 +1628,22 @@ bdev_ocf_start_watchdog(struct vbdev_ocf *vbdev)
 }
 
 static double
-_ocf_policy_test_measure(void *ctx)
+_ocf_policy_measure(void *ctx, bool *success)
 {
-	(void)ctx;
-	return 0.0;
+	struct vbdev_ocf *vbdev = ctx;
+
+	if (!vbdev->rt.new) {
+		*success = false;
+		return 0.0;
+	}
+
+	vbdev->rt.new = false;
+
+    *success = true;
+
+	/* Convert ticks → microseconds */
+	return (double)vbdev->rt.rt_ticks *
+	       1000000.0 / spdk_get_ticks_hz();
 }
 
 static void
@@ -1605,10 +1654,29 @@ _ocf_policy_test_evaluate(const struct bdev_policy_sample *samples,
 	(void)samples;
 	(void)sample_count;
 	(void)ctx;
+
+	// This should
+	/*
+	 - determine if this sample is violated, and if so, set it as such
+	 - if violated, check if the last X samples were also vioalted,
+	 - if that is the case, then we need to change the mode
+	
+	
+	
+	
+	*/
 }
 
 /* Init and then start vbdev if all base devices are present */
 // TODO (farrer) -- place to grab cache mode, and to register the 
+
+
+
+
+// TODO (farrer), get the slo params, create an opt struct, then create effective functions above
+// for measurement and evaluation. Measure should see the last IO that went in, but only if new.
+// Evaluate should decide if we need to change mode based on violation etc, and it should do that if thats
+// the case
 void
 vbdev_ocf_construct(
     const char *vbdev_name,
@@ -1667,8 +1735,27 @@ vbdev_ocf_construct(
 
 		// Only start the watchdog if passthrough (PT) cache mode and policy is enabled
         if (vbdev->slo_enabled && strcmp(cache_mode_name, "pt") == 0) {
+			
+			// need to set this, as IO channels may do unsafe accesses
+			vbdev->owner_thread = spdk_get_thread();
+
+			// create opt struct here
+			// use it to create a bdev_policy_watcher_create
+			struct bdev_policy_watcher_opts opts = {
+				.window_duration_ticks = vbdev->slo.rw_duration_us,
+				.min_samples = vbdev->slo.rw_min_sample,
+				.evaluation_interval_ticks = vbdev->slo.evaluation_ticks_us,
+			};
+
+			struct bdev_policy_watcher *watcher = bdev_policy_watcher_create(
+													&opts,
+													_ocf_policy_measure,
+													_ocf_policy_test_evaluate,
+													(void *)vbdev);
+
+
 			SPDK_NOTICELOG("Starting OCF watchdog for vbdev: %s\n", vbdev->name);
-            bdev_ocf_start_watchdog(vbdev); // Registers SPDK poller
+            bdev_ocf_start_watchdog(vbdev); // Registers SPDK poller // remove this poller later
         }
 	} else {
 		cb(0, vbdev, cb_arg);

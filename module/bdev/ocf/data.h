@@ -15,6 +15,7 @@ struct bdev_ocf_data {
 	int iovalloc;
 	uint32_t size;
 	uint32_t seek;
+	uint64_t submit_ticks;
 };
 
 struct bdev_ocf_data *vbdev_ocf_data_from_spdk_io(struct spdk_bdev_io *bdev_io);

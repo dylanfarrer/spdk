@@ -13,39 +13,33 @@ extern "C" {
 
 struct bdev_policy_watcher;
 
-/*
- * One measurement sample
- * You can extend this later if needed (percentiles, error codes, etc.)
- */
+// Sample of a measured metric at a point in time
 struct bdev_policy_sample {
-	uint64_t timestamp_ticks;
-	double   value;
-	TAILQ_ENTRY(bdev_policy_sample) link;
+	uint64_t timestamp_ticks;             	// When the sample was taken
+	double   value;                       	// Measured value
+	bool     in_violation;				 	// Whether this sample violated the policy (tbd by evaluate fn)
+	TAILQ_ENTRY(bdev_policy_sample) link; 	// Link in samples list
 };
 
-/*
- * Called periodically to obtain a measurement.
- * Should be fast and non-blocking.
- */
-typedef double (*bdev_policy_measure_fn)(void *ctx);
+typedef double (*bdev_policy_measure_fn)(void *ctx, bool *success); // function to measure the metric
 
 /*
- * Called when a valid window exists.
+ * Called when a valid window exists. (if window of X ticks has contained at least Y samples)
  * Return value is policy-defined (e.g., violation / ok).
  */
 typedef void (*bdev_policy_evaluate_fn)(
 	const struct bdev_policy_sample *samples,
 	uint32_t sample_count,
 	void *ctx
-);
+); // function to evaluate policy adherence
 
 /*
- * Parameters controlling the watcher behavior
+ * Parameters controlling the watcher behavior, to be set at bdev creation time
  */
 struct bdev_policy_watcher_opts {
-	uint64_t window_duration_ticks;
-	uint32_t min_samples;
-	uint64_t evaluation_interval_ticks;
+	uint64_t window_duration_ticks; 	     // Duration of the sliding window
+	uint32_t min_samples;                    // Min sample count to validate a window
+	uint64_t evaluation_interval_ticks;      // How often to evaluate the policy
 };
 
 /*

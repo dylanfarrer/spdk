@@ -3,17 +3,18 @@
 #include "bdev_policy_watcher.h"
 #include "spdk/log.h"
 
+// Definition of the policy watcher structure
 struct bdev_policy_watcher {
-	struct bdev_policy_watcher_opts opts;
+	struct bdev_policy_watcher_opts opts; 		// Opts set by user
 
-	bdev_policy_measure_fn  measure_fn;
-	bdev_policy_evaluate_fn evaluate_fn;
-	void *ctx;
+	bdev_policy_measure_fn  measure_fn;  		// function to measure the metric
+	bdev_policy_evaluate_fn evaluate_fn; 		// function to evaluate policy adherence
+	void *ctx;                          		// context for the functions
 
-	struct spdk_poller *poller;
+	struct spdk_poller *poller;          		// poller to implement periodic calling
 
-	TAILQ_HEAD(, bdev_policy_sample) samples;
-	uint32_t sample_count;
+	TAILQ_HEAD(, bdev_policy_sample) samples; 	// list of samples taken
+	uint32_t sample_count;						// sample count
 };
 
 static void
@@ -30,30 +31,36 @@ _prune_old_samples(struct bdev_policy_watcher *w, uint64_t now)
 	}
 }
 
+// This is actually what the poller calls periodically (every X ticks)
+// arg is just the watcher structure
 static int
 _policy_poller(void *arg)
 {
 	struct bdev_policy_watcher *w = arg;
 	uint64_t now = spdk_get_ticks();
 
-	/* Measure */
-	double value = w->measure_fn(w->ctx);
+	bool success;
 
-	struct bdev_policy_sample *s = calloc(1, sizeof(*s));
-	if (!s) {
-		SPDK_ERRLOG("Policy watcher OOM\n");
-		return SPDK_POLLER_BUSY;
+	// Measure
+	double value = w->measure_fn(w->ctx, &success);
+
+	if (success) {
+		struct bdev_policy_sample *s = calloc(1, sizeof(*s));
+		if (!s) {
+			SPDK_ERRLOG("Policy watcher OOM\n");
+			return SPDK_POLLER_BUSY;
+		}
+
+		s->timestamp_ticks = now;
+		s->value = value;
+		TAILQ_INSERT_TAIL(&w->samples, s, link);
+		w->sample_count++;
 	}
 
-	s->timestamp_ticks = now;
-	s->value = value;
-	TAILQ_INSERT_TAIL(&w->samples, s, link);
-	w->sample_count++;
-
-	/* Prune */
+	// Prune outdated samples
 	_prune_old_samples(w, now);
 
-	/* Evaluate if window is valid */
+	// Evaluate only f window is valid
 	if (w->sample_count >= w->opts.min_samples) {
 		w->evaluate_fn(TAILQ_FIRST(&w->samples),
 			       w->sample_count,
@@ -63,6 +70,7 @@ _policy_poller(void *arg)
 	return SPDK_POLLER_BUSY;
 }
 
+/* Create a new policy watcher, based on options, a measurement and evaluation function and some context */
 struct bdev_policy_watcher *
 bdev_policy_watcher_create(const struct bdev_policy_watcher_opts *opts,
 			   bdev_policy_measure_fn measure_fn,
@@ -71,6 +79,7 @@ bdev_policy_watcher_create(const struct bdev_policy_watcher_opts *opts,
 {
 	struct bdev_policy_watcher *w;
 
+	// init and zero the structure
 	w = calloc(1, sizeof(*w));
 	if (!w) {
 		return NULL;
@@ -106,6 +115,7 @@ bdev_policy_watcher_stop(struct bdev_policy_watcher *w)
 	}
 }
 
+// Destroy a policy watcher, freeing all resources
 void
 bdev_policy_watcher_destroy(struct bdev_policy_watcher *w)
 {
@@ -135,6 +145,7 @@ measure_latency(void *ctx)
 	struct my_mirror *m = ctx;
 	return m->last_latency_us;
 }
+
 
 static void
 evaluate_latency_policy(const struct bdev_policy_sample *samples,
