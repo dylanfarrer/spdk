@@ -1646,37 +1646,97 @@ _ocf_policy_measure(void *ctx, bool *success)
 	       1000000.0 / spdk_get_ticks_hz();
 }
 
+static int
+_compare_u64(const void *a, const void *b)
+{
+	uint64_t va = *(const uint64_t *)a;
+	uint64_t vb = *(const uint64_t *)b;
+
+	if (va < vb) return -1;
+	if (va > vb) return 1;
+	return 0;
+}
+
 static void
-_ocf_policy_test_evaluate(const struct bdev_policy_sample *samples,
+_ocf_policy_evaluate(struct bdev_policy_sample *samples,
 			  uint32_t sample_count,
 			  void *ctx)
 {
-	(void)samples;
-	(void)sample_count;
-	(void)ctx;
 
-	// This should
-	/*
-	 - determine if this sample is violated, and if so, set it as such
-	 - if violated, check if the last X samples were also vioalted,
-	 - if that is the case, then we need to change the mode
-	
-	
-	
-	
-	*/
+	struct vbdev_ocf *vbdev = ctx;
+
+	uint64_t values[sample_count];
+	uint64_t violation_window_start_ts = spdk_get_ticks() - (vbdev->slo.violation_time_us * spdk_get_ticks_hz() / 1000000);
+	uint64_t violation_window_sample_count = 0;
+	bool check_timestamp = samples[0].timestamp_ticks < violation_window_start_ts;
+	bool all_in_violation = true;
+	bool all_not_in_violation = true;
+
+	// add each samples value to a values array
+	// and
+	// see if either all samples that are within the last (violation_window_start_ts) ticks are violated, or all not violated.
+	// dont include last one as it has not been set to violated or not yet
+	for (uint64_t i = 0; i < sample_count - 1; i++) {
+		values[i] = samples[i].value;
+
+		if (all_in_violation || all_not_in_violation) {
+			if (!check_timestamp || samples[i].timestamp_ticks > violation_window_start_ts) {
+				violation_window_sample_count++;
+				all_in_violation = all_in_violation && samples[i].in_violation;
+				all_not_in_violation = all_not_in_violation && !samples[i].in_violation;
+			}
+		}
+	}
+	// add last sample to values
+	values[sample_count - 1] = samples[sample_count - 1].value;
+
+	qsort(values, sample_count, sizeof(uint64_t), _compare_u64);
+
+	uint64_t idx = (uint64_t) vbdev->slo.percentile * sample_count;
+	idx = (idx + 99) / 100; 
+	if (idx > 0) {
+		idx--;
+	}
+	if (idx >= sample_count) {
+		idx = sample_count - 1;
+	}
+
+	uint64_t percentile_value = values[idx];
+	// determine if this sample should be deemed in violation or not
+	samples[sample_count-1].in_violation = percentile_value > vbdev->slo.latency_us;
+	// include the latest sample in these bools.
+	all_in_violation = all_in_violation && samples[sample_count-1].in_violation;
+	all_not_in_violation = all_not_in_violation && !samples[sample_count-1].in_violation;
+
+	// if we found no recent samples in the violation window, we cannot make a mode change decision
+	if (violation_window_sample_count == 0) {
+		return;
+	}
+
+	// if we did not collect enough samples in the violation window, we cannot make a mode change decision
+	// + 1 to account for the latest sample, which was not previously included
+	// TODO (farrer) check we do not have to consider new sample in violation_window_ or not, time wise
+	if (violation_window_sample_count + 1 < vbdev->slo.rw_min_sample) {
+		return;
+	}
+
+	// should not be possible to get here now, but adding for security, we cannot say it was one way or the other in this case.
+	if (all_in_violation && all_not_in_violation) {
+		return;
+	}
+
+	if (all_in_violation && !vbdev->violated_core) {
+		// mode change to use cache
+	}
+
+	if (all_not_in_violation && vbdev->violated_core) {
+		// mode change to passthrough
+	}
+
+	return;
 }
 
-/* Init and then start vbdev if all base devices are present */
-// TODO (farrer) -- place to grab cache mode, and to register the 
-
-
-
-
-// TODO (farrer), get the slo params, create an opt struct, then create effective functions above
-// for measurement and evaluation. Measure should see the last IO that went in, but only if new.
-// Evaluate should decide if we need to change mode based on violation etc, and it should do that if thats
-// the case
+/* Create and start OCF bdev */
 void
 vbdev_ocf_construct(
     const char *vbdev_name,
@@ -1750,7 +1810,7 @@ vbdev_ocf_construct(
 			struct bdev_policy_watcher *watcher = bdev_policy_watcher_create(
 													&opts,
 													_ocf_policy_measure,
-													_ocf_policy_test_evaluate,
+													_ocf_policy_evaluate,
 													(void *)vbdev);
 
 
