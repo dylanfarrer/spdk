@@ -28,7 +28,7 @@ typedef double (*bdev_policy_measure_fn)(void *ctx, bool *success); // function 
  * Return value is policy-defined (e.g., violation / ok).
  */
 typedef void (*bdev_policy_evaluate_fn)(
-	const struct bdev_policy_sample *samples,
+	struct bdev_policy_sample *samples,
 	uint32_t sample_count,
 	void *ctx
 ); // function to evaluate policy adherence
